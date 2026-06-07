@@ -69,8 +69,9 @@ def read_images_txt(path):
 
 def read_points3D_xyz(sparse_dir):
     """Read the 3D point cloud XYZ from a COLMAP model.
-    Tries points3D.txt first (text model), then points3D.bin (binary model).
-    Returns an [M, 3] float64 array, or None if no point file is present."""
+    Tries points3D.txt (text model), then points3D.ply (e.g. exported SfM cloud),
+    then points3D.bin (binary model). Returns an [M, 3] float64 array, or None if
+    no point file is present."""
     txt = Path(sparse_dir) / "points3D.txt"
     if txt.exists():
         xyz = []
@@ -82,6 +83,17 @@ def read_points3D_xyz(sparse_dir):
                 tok = line.split()
                 xyz.append([float(tok[1]), float(tok[2]), float(tok[3])])
         return np.array(xyz, dtype=np.float64) if xyz else None
+    ply = Path(sparse_dir) / "points3D.ply"
+    if ply.exists():
+        try:
+            from plyfile import PlyData
+            v = PlyData.read(str(ply))["vertex"]
+            xyz = np.stack([np.asarray(v["x"]), np.asarray(v["y"]),
+                            np.asarray(v["z"])], axis=1).astype(np.float64)
+            return xyz if len(xyz) else None
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] failed to parse points3D.ply: {e}")
+            return None
     binp = Path(sparse_dir) / "points3D.bin"
     if binp.exists():
         try:
