@@ -30,7 +30,6 @@ from tqdm import tqdm
 
 from src.config import load_typed_root_config
 from src.global_cfg import set_cfg
-from src.loss import get_losses
 from src.misc.image_io import save_image
 from src.model.decoder import get_decoder
 from src.model.encoder import get_encoder
@@ -65,7 +64,7 @@ def load_model(cfg, checkpoint, device):
         encoder=encoder,
         encoder_visualizer=encoder_visualizer,
         decoder=decoder,
-        losses=get_losses(cfg.loss),
+        losses=[],  # rendering only: no loss needed (avoids LPIPS/VGG weight download)
         step_tracker=None,
         strict=False,
     )
