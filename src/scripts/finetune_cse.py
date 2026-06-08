@@ -107,7 +107,7 @@ def main():
                     "global_step": step}, p)
         print(f"\n[ckpt] saved {p}")
 
-    step, done = 0, False
+    step, done, ema = 0, False, None
     pbar = tqdm(total=args.steps, desc="finetune")
     while not done:
         for batch in loader:
@@ -136,10 +136,15 @@ def main():
 
             step += 1
             pbar.update(1)
+            # Track an EMA so the bar reflects the trend, not single-sample noise
+            # (per-sample PSNR varies wildly with how well the context covers the
+            # target view; batch_size=1 makes the instantaneous value very noisy).
+            cur = {"mse": mse.item(), "lpips": lp.item(), "loss": loss.item()}
+            ema = cur if ema is None else {k: 0.97 * ema[k] + 0.03 * cur[k] for k in cur}
             if step % args.log_every == 0:
-                psnr = -10 * math.log10(mse.item() + 1e-12)
-                pbar.set_postfix(loss=f"{loss.item():.4f}", psnr=f"{psnr:.2f}",
-                                 lpips=f"{lp.item():.3f}")
+                pbar.set_postfix(loss=f"{ema['loss']:.4f}",
+                                 psnr=f"{-10 * math.log10(ema['mse'] + 1e-12):.2f}",
+                                 lpips=f"{ema['lpips']:.3f}")
             if step % args.save_every == 0 or step >= args.steps:
                 save(step)
             if step >= args.steps:
