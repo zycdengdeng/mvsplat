@@ -168,3 +168,86 @@ class DatasetCarlaCSE(Dataset):
                 "index": torch.tensor([t], dtype=torch.int64),
             },
         }
+
+
+class DatasetCarlaCSETrain(Dataset):
+    """Training pairs from CARLA source-only scenes (odd cameras with COLMAP poses).
+
+    One item == one anchor view used as the TARGET, with its `num_context_views`
+    nearest views as context. This mirrors the K-nearest interpolation used at test
+    time (odd->even), here as odd->odd self-supervision. Both context and target are
+    resized to the model input size; the loss is photometric (handled by the caller).
+    """
+
+    def __init__(
+        self,
+        data_dir,
+        image_shape=(256, 256),
+        num_context_views: int = 6,
+        near: float | None = None,
+        far: float | None = None,
+        default_near: float = 0.5,
+        default_far: float = 150.0,
+    ):
+        self.data_dir = Path(data_dir)
+        self.image_shape = tuple(image_shape)
+        self.num_context_views = num_context_views
+        self.cli_near, self.cli_far = near, far
+        self.default_near, self.default_far = default_near, default_far
+        self.to_tensor = tf.ToTensor()
+        self.index = json.load(open(self.data_dir / "index.json"))
+        self.meta = json.load(open(self.data_dir / "cse_meta.json"))
+        self._chunk_cache: dict[str, dict] = {}
+        self.items = []
+        for scene_key in self.index:
+            n = len(self.meta[scene_key]["names"])
+            for a in range(n):
+                self.items.append((scene_key, a))
+
+    scene_near_far = DatasetCarlaCSE.scene_near_far
+    _load_scene = DatasetCarlaCSE._load_scene
+    _decode = DatasetCarlaCSE._decode
+
+    def __len__(self):
+        return len(self.items)
+
+    def __getitem__(self, i):
+        scene_key, a = self.items[i]
+        scene = self._load_scene(scene_key)
+        extrinsics, intrinsics = convert_poses(scene["cameras"])
+
+        # context = nearest views to the anchor (by camera center), anchor excluded
+        centers = extrinsics[:, :3, 3]
+        d = (centers - centers[a]).norm(dim=1)
+        d[a] = float("inf")
+        k = min(self.num_context_views, d.numel() - 1)
+        ctx = torch.topk(d, k, largest=False).indices
+
+        ctx_imgs = torch.stack([self._decode(scene["images"][int(c)]) for c in ctx])
+        ctx_K = intrinsics[ctx].clone()
+        ctx_imgs, ctx_K = rescale_and_crop(ctx_imgs, ctx_K, self.image_shape)
+
+        tgt_img = self._decode(scene["images"][a]).unsqueeze(0)
+        tgt_K = intrinsics[a : a + 1].clone()
+        tgt_img, tgt_K = rescale_and_crop(tgt_img, tgt_K, self.image_shape)
+
+        near, far = self.scene_near_far(scene_key)
+        return {
+            "scene": scene_key,
+            "context": {
+                "image": ctx_imgs,
+                "intrinsics": ctx_K,
+                "extrinsics": extrinsics[ctx],
+                "near": torch.full((k,), near, dtype=torch.float32),
+                "far": torch.full((k,), far, dtype=torch.float32),
+                "index": ctx.to(torch.int64),
+            },
+            "target": {
+                "image": tgt_img,
+                "intrinsics": tgt_K,
+                "extrinsics": extrinsics[a : a + 1],
+                "near": torch.full((1,), near, dtype=torch.float32),
+                "far": torch.full((1,), far, dtype=torch.float32),
+                "index": torch.tensor([a], dtype=torch.int64),
+            },
+        }

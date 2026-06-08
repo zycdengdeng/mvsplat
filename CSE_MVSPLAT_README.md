@@ -84,6 +84,36 @@ clearly below GS-Net** — that gap *is* the indoor→outdoor transfer evidence.
 fair, in-domain comparison would come from a CARLA fine-tuned run (RGB+pose only),
 which is a separate follow-up.
 
+## Fine-tuning on CARLA (in-domain comparison)
+
+The zero-shot numbers above use the RealEstate10K weights as-is. For the fair,
+in-domain comparison, fine-tune from `re10k.ckpt` on the CARLA **training** scenes
+(sequences 101–109 … 501–509; the 5 test scenes 110/210/310/410/510 are held out).
+
+1. Convert the training scenes (their COLMAP models are binary; the converter
+   auto-detects `.bin`):
+   ```bash
+   python tools/colmap_to_pixelsplat.py \
+       --scenes /path/to/input_output/101_dense /path/to/input_output/102_dense ... \
+       --out datasets/carla_cse/train
+   ```
+   Each prints `60 src / 0 tgt` (training scenes have no `test.txt`).
+
+2. Fine-tune (photometric MSE + LPIPS, K-nearest-view self-supervision):
+   ```bash
+   python -m src.scripts.finetune_cse \
+       --data_dir   datasets/carla_cse/train \
+       --checkpoint re10k.ckpt \
+       --out        checkpoints/carla_ft \
+       --num_context_views 6 --steps 8000
+   ```
+
+3. Evaluate the fine-tuned checkpoint with the SAME pipeline (Steps 2–3 above),
+   pointing `--checkpoint` at `checkpoints/carla_ft/finetune_008000.ckpt` and using
+   the same `--num_context_views`. Report alongside the zero-shot numbers.
+
+> Train and test with the **same** `--num_context_views` (e.g. 6) for consistency.
+
 ## Acceptance checklist
 
 - [ ] Converter prints `60 src / 60 tgt` for all 5 scenes.
