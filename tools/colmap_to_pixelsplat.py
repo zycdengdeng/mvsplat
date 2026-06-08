@@ -21,7 +21,11 @@ import argparse, io, json, os
 from pathlib import Path
 import numpy as np
 import torch
-from PIL import Image
+from PIL import Image, ImageFile
+
+# Tolerate partially-truncated PNG/JPEG; genuinely empty files still raise and
+# are skipped per-view by convert_scene.
+ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 def qvec2rotmat(qvec):
@@ -234,14 +238,20 @@ def convert_scene(scene_dir, jpeg_quality=95):
         cam = cameras[im["camera_id"]]
         W, H = cam["width"], cam["height"]
         fx, fy, cx, cy = intrinsics_from_camera(cam)
+        # Load the image first; skip the whole view if it is missing/corrupt so a
+        # single bad frame does not abort the run (keeps cameras/images in lockstep).
+        try:
+            tens, (iw, ih) = jpeg_bytes_tensor(img_dir / im["name"], jpeg_quality)
+        except Exception as e:  # noqa: BLE001
+            print(f"[warn] skip {scene_id}/{im['name']}: cannot load image ({e})")
+            continue
+        if (iw, ih) != (W, H):
+            print(f"[warn] {im['name']}: image {iw}x{ih} != model {W}x{H}")
         R = qvec2rotmat(im["qvec"]); t = im["tvec"]
         w2c_3x4 = np.concatenate([R, t.reshape(3, 1)], axis=1)
         cam_rows.append(np.concatenate([
             np.array([fx/W, fy/H, cx/W, cy/H, 0.0, 0.0]), w2c_3x4.reshape(-1)]))
         cam_centers.append((-R.T @ t).tolist())
-        tens, (iw, ih) = jpeg_bytes_tensor(img_dir / im["name"], jpeg_quality)
-        if (iw, ih) != (W, H):
-            print(f"[warn] {im['name']}: image {iw}x{ih} != cameras.txt {W}x{H}")
         image_tensors.append(tens)
         tgt = im["name"] in target_names
         names.append(im["name"]); is_target.append(tgt); timestamps.append(idx)
