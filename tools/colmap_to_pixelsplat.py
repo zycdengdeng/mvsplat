@@ -67,6 +67,66 @@ def read_images_txt(path):
     return images
 
 
+# COLMAP binary camera models: id -> (name, num_params)
+_CAM_MODELS = {
+    0: ("SIMPLE_PINHOLE", 3), 1: ("PINHOLE", 4), 2: ("SIMPLE_RADIAL", 4),
+    3: ("RADIAL", 5), 4: ("OPENCV", 8), 5: ("OPENCV_FISHEYE", 8),
+    6: ("FULL_OPENCV", 12), 7: ("FOV", 5), 8: ("SIMPLE_RADIAL_FISHEYE", 4),
+    9: ("RADIAL_FISHEYE", 5), 10: ("THIN_PRISM_FISHEYE", 12),
+}
+
+
+def read_cameras_bin(path):
+    import struct
+    cameras = {}
+    with open(path, "rb") as f:
+        (num,) = struct.unpack("<Q", f.read(8))
+        for _ in range(num):
+            cam_id, model_id, width, height = struct.unpack("<iiQQ", f.read(24))
+            name, npar = _CAM_MODELS[model_id]
+            params = struct.unpack("<" + "d" * npar, f.read(8 * npar))
+            cameras[cam_id] = dict(model=name, width=int(width),
+                                   height=int(height), params=list(params))
+    return cameras
+
+
+def read_images_bin(path):
+    import struct
+    images = []
+    with open(path, "rb") as f:
+        (num,) = struct.unpack("<Q", f.read(8))
+        for _ in range(num):
+            struct.unpack("<i", f.read(4))                 # image_id
+            qvec = np.array(struct.unpack("<dddd", f.read(32)), dtype=np.float64)
+            tvec = np.array(struct.unpack("<ddd", f.read(24)), dtype=np.float64)
+            (cam_id,) = struct.unpack("<i", f.read(4))
+            name = b""
+            while True:
+                c = f.read(1)
+                if c == b"\x00":
+                    break
+                name += c
+            (num2d,) = struct.unpack("<Q", f.read(8))
+            f.read(num2d * 24)                             # skip 2D points
+            images.append(dict(name=name.decode(), qvec=qvec, tvec=tvec,
+                               camera_id=cam_id))
+    return images
+
+
+def read_cameras(sparse):
+    sparse = Path(sparse)
+    if (sparse / "cameras.txt").exists():
+        return read_cameras_txt(sparse / "cameras.txt")
+    return read_cameras_bin(sparse / "cameras.bin")
+
+
+def read_images(sparse):
+    sparse = Path(sparse)
+    if (sparse / "images.txt").exists():
+        return read_images_txt(sparse / "images.txt")
+    return read_images_bin(sparse / "images.bin")
+
+
 def read_points3D_xyz(sparse_dir):
     """Read the 3D point cloud XYZ from a COLMAP model.
     Tries points3D.txt (text model), then points3D.ply (e.g. exported SfM cloud),
@@ -162,8 +222,8 @@ def convert_scene(scene_dir, jpeg_quality=95):
     scene_dir = Path(scene_dir)
     scene_id = scene_dir.name
     sparse = scene_dir / "sparse" / "0"
-    cameras = read_cameras_txt(sparse / "cameras.txt")
-    images = read_images_txt(sparse / "images.txt")
+    cameras = read_cameras(sparse)
+    images = read_images(sparse)
     test_txt = sparse / "test.txt"
     target_names = {ln.strip() for ln in open(test_txt) if ln.strip()} if test_txt.exists() else set()
     img_dir = scene_dir / "images"
