@@ -37,12 +37,17 @@ from src.model.model_wrapper import ModelWrapper
 from src.dataset.dataset_carla_cse import DatasetCarlaCSE
 
 
-def build_cfg(experiment: str, checkpoint: str, image_shape):
+def build_cfg(experiment: str, checkpoint: str, image_shape, num_context_views: int):
     """Compose the repo's Hydra config (same groups as `src.main` test mode)."""
     overrides = [
         f"+experiment={experiment}",
         "mode=test",
-        "dataset/view_sampler=evaluation",  # -> num_context_views = 2
+        "dataset/view_sampler=evaluation",
+        # Build the encoder for the actual number of context views we feed. The
+        # released weights are 2-view, but num_views only drives cross-view
+        # attention grouping (no weight-shape dependency), so K-view inference
+        # works and just changes coverage.
+        f"dataset.view_sampler.num_context_views={num_context_views}",
         f"checkpointing.load={checkpoint}",
         f"dataset.image_shape=[{image_shape[0]},{image_shape[1]}]",
         "wandb.mode=disabled",
@@ -96,7 +101,8 @@ def main():
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cfg_dict, cfg = build_cfg(args.experiment, args.checkpoint, args.image_shape)
+    cfg_dict, cfg = build_cfg(args.experiment, args.checkpoint, args.image_shape,
+                              args.num_context_views)
     model = load_model(cfg, args.checkpoint, device)
     encoder, decoder = model.encoder, model.decoder
 
