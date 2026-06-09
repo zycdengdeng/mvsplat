@@ -100,6 +100,8 @@ def main():
     ap.add_argument("--image_shape", type=int, nargs=2, default=[256, 256])
     ap.add_argument("--fwd_thresh", type=float, default=0.3,
                     help="keep context views whose forward dir dot base > this")
+    ap.add_argument("--pos_scale", type=float, default=1.0,
+                    help="scale all translation offsets (use if COLMAP isn't metric)")
     ap.add_argument("--near", type=float, default=None)
     ap.add_argument("--far", type=float, default=None)
     ap.add_argument("--default_near", type=float, default=0.5)
@@ -174,7 +176,7 @@ def main():
                           v["fx"], v["fy"], v["cx"], v["cy"], v["width"], v["height"]))
     else:
         for tag, dpos, yaw, pitch in OFFSETS:
-            Cp = bc + Rb.T @ np.array(dpos, dtype=np.float64)
+            Cp = bc + Rb.T @ (np.array(dpos, dtype=np.float64) * args.pos_scale)
             Rp = Rx(np.deg2rad(pitch)) @ Ry(np.deg2rad(yaw)) @ Rb
             tp = -Rp @ Cp
             w2c = np.eye(4)
