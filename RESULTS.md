@@ -28,23 +28,27 @@ comparison with GS-Net / 3DGS.
 
 ## MVSplat results
 
+All numbers below use the **direction-aware** context selection (`--align_thresh 0.5`),
+the final unified protocol. (Legacy pure-nearest numbers were superseded.)
+
 ### CSE (5-seq avg)
-| Config | PSNR | SSIM | LPIPS | notes |
-|---|---|---|---|---|
-| zero-shot, 2-view | 10.36 | 0.467 | 0.543 | re10k, legacy sel. |
-| zero-shot, 6-view | 16.61 | 0.669 | 0.454 | re10k, legacy sel. |
-| CARLA fine-tune, 6-view (best @500) | **17.07** | 0.655 | 0.429 | lr5e-6 |
-| CARLA fine-tune lr2e-5 @2k/4k/8k | 16.36 / 16.16 / 16.05 | | | over-trains |
+| Config | PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| zero-shot, 2-view | 15.72 | 0.643 | 0.492 |
+| zero-shot, 6-view | 17.28 | 0.671 | 0.451 |
+| CARLA fine-tune v2, 6-view @500 | 17.77 | 0.669 | 0.412 |
+| **CARLA fine-tune v2, 6-view @1000 (best)** | **17.96** | 0.674 | 0.405 |
+| CARLA fine-tune v2, 6-view @1500 | 17.94 | 0.668 | 0.409 |
 
 ### SSE (4-seq avg, excl. 310)
-| Config | PSNR | SSIM | LPIPS | notes |
-|---|---|---|---|---|
-| zero-shot, 2-view | 4.51 → **7.61** | 0.142 → 0.402 | 0.637 → 0.567 | legacy → direction-aware |
-| zero-shot, 6-view | 13.68 | 0.613 | 0.489 | legacy sel. |
-| CARLA fine-tune, 6-view | 14.62 | 0.610 | 0.457 | legacy sel. |
+| Config | PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| zero-shot, 2-view | 7.61 | 0.402 | 0.567 |
+| zero-shot, 6-view | 14.86 | 0.663 | 0.475 |
+| CARLA fine-tune v2, 6-view | _TBD_ | | |
 
 > SSE is a forced fit for feed-forward (temporal forward-baseline interpolation);
-> report 6-view; treat as supplementary.
+> 6-view is the representative number; treat SSE as supplementary.
 
 ### nuScenes (qualitative)
 re10k & acid, each with **2-view** and **same-frame (6 surround cams)** context.
@@ -67,10 +71,10 @@ views with that method into `<m>/<id>/renders/<exact test.txt name>.png`, then s
 `tools/eval_cse.py --multi`. Same data, same scorer = comparable.
 
 ## Status
-- [x] MVSplat CSE (zero-shot 2/6-view, fine-tuned)
-- [x] MVSplat SSE (zero-shot 2/6-view, fine-tuned)
+- [x] MVSplat CSE (zero-shot 2/6-view, fine-tuned v2) — direction-aware, final
+- [x] MVSplat SSE (zero-shot 2/6-view) — direction-aware, final
+- [ ] MVSplat SSE fine-tune v2 @1000 (run with the best CSE ckpt)
 - [x] MVSplat nuScenes (re10k/acid, 2-view/same-frame)
 - [x] MonoSplat CSE
 - [ ] nuScenes montages + GS-Net side-by-side
-- [ ] (optional) re-run CSE/SSE with consistent direction-aware selection for final numbers
 - [ ] DepthSplat (sister task)
