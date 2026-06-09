@@ -62,6 +62,8 @@ def main():
     ap.add_argument("--log_every", type=int, default=50)
     ap.add_argument("--near", type=float, default=None)
     ap.add_argument("--far", type=float, default=None)
+    ap.add_argument("--align_thresh", type=float, default=0.5,
+                    help="context forward-dot threshold (-1 = pure nearest-center)")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -89,7 +91,7 @@ def main():
 
     dataset = DatasetCarlaCSETrain(
         args.data_dir, tuple(args.image_shape), args.num_context_views,
-        near=args.near, far=args.far,
+        near=args.near, far=args.far, align_thresh=args.align_thresh,
     )
     loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True,
                         num_workers=args.num_workers, drop_last=True)

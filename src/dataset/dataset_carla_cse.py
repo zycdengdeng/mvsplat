@@ -51,24 +51,33 @@ def convert_poses(poses: torch.Tensor):
 
 
 class ViewSamplerCSE:
-    """For each target view, pick the `num_context_views` nearest source views."""
+    """For each target view, pick the `num_context_views` context source views.
 
-    def __init__(self, num_context_views: int = 2):
+    Selection is direction-aware: keep sources whose viewing direction aligns with
+    the target (forward-dot > align_thresh), then take the nearest by camera center.
+    This matters a lot on the CARLA rig where all cameras share ~one center, so a
+    pure nearest-center rule can pick a camera pointing a different way (→ the
+    context never sees what the target sees → near-black render). Set align_thresh
+    to -1 to disable the filter (pure nearest-center, legacy behavior).
+    """
+
+    def __init__(self, num_context_views: int = 2, align_thresh: float = 0.5):
         self.num_context_views = num_context_views
+        self.align_thresh = align_thresh
 
-    def pairs(self, is_target, cam_centers):
+    def targets(self, is_target):
+        return [int(t) for t in np.where(np.asarray(is_target, dtype=bool))[0]]
+
+    def context_for(self, t, centers, forwards, is_target):
         is_target = np.asarray(is_target, dtype=bool)
-        centers = np.asarray(cam_centers, dtype=np.float64)
-        source_idx = np.where(~is_target)[0]
-        target_idx = np.where(is_target)[0]
-        assert len(source_idx) >= self.num_context_views, (
-            f"need >= {self.num_context_views} source views, got {len(source_idx)}")
-        items = []
-        for t in target_idx:
-            d = np.linalg.norm(centers[source_idx] - centers[t], axis=1)
-            ctx = source_idx[np.argsort(d)[: self.num_context_views]]
-            items.append((int(t), [int(c) for c in ctx]))
-        return items
+        src = np.where(~is_target)[0]
+        assert len(src) >= self.num_context_views, (
+            f"need >= {self.num_context_views} source views, got {len(src)}")
+        keep = src[(forwards[src] @ forwards[t]) > self.align_thresh]
+        if len(keep) < self.num_context_views:
+            keep = src  # too few aligned -> relax to all sources
+        d = np.linalg.norm(centers[keep] - centers[t], axis=1)
+        return [int(c) for c in keep[np.argsort(d)[: self.num_context_views]]]
 
 
 class DatasetCarlaCSE(Dataset):
@@ -83,6 +92,7 @@ class DatasetCarlaCSE(Dataset):
         far: float | None = None,
         default_near: float = 0.5,
         default_far: float = 150.0,
+        align_thresh: float = 0.5,
     ):
         self.data_dir = Path(data_dir)
         self.image_shape = tuple(image_shape)
@@ -90,7 +100,7 @@ class DatasetCarlaCSE(Dataset):
         self.cli_near, self.cli_far = near, far
         self.default_near, self.default_far = default_near, default_far
         self.to_tensor = tf.ToTensor()
-        self.sampler = ViewSamplerCSE(num_context_views)
+        self.sampler = ViewSamplerCSE(num_context_views, align_thresh)
 
         self.index = json.load(open(self.data_dir / "index.json"))
         self.meta = json.load(open(self.data_dir / "cse_meta.json"))
@@ -98,12 +108,12 @@ class DatasetCarlaCSE(Dataset):
         # Lazily cache loaded chunks (one scene per chunk by default).
         self._chunk_cache: dict[str, dict] = {}
 
-        # Flatten into (scene_key, target_idx, context_idx) items.
+        # One item per target view; context is chosen per-item in __getitem__
+        # (needs orientation, available only after loading the poses).
         self.items = []
         for scene_key in self.index:
-            m = self.meta[scene_key]
-            for t, ctx in self.sampler.pairs(m["is_target"], m["cam_centers"]):
-                self.items.append((scene_key, t, ctx))
+            for t in self.sampler.targets(self.meta[scene_key]["is_target"]):
+                self.items.append((scene_key, t))
 
     def scene_near_far(self, scene_key: str):
         if self.cli_near is not None and self.cli_far is not None:
@@ -130,12 +140,17 @@ class DatasetCarlaCSE(Dataset):
         return len(self.items)
 
     def __getitem__(self, i):
-        scene_key, t, ctx = self.items[i]
+        scene_key, t = self.items[i]
         scene = self._load_scene(scene_key)
         m = self.meta[scene_key]
         extrinsics, intrinsics = convert_poses(scene["cameras"])
 
-        # ----- context: nearest source views, resized to the model input size -----
+        # direction-aware context selection (orientation from the loaded poses)
+        centers = extrinsics[:, :3, 3].numpy()
+        forwards = (extrinsics[:, :3, :3] @ torch.tensor([0.0, 0.0, 1.0])).numpy()
+        ctx = self.sampler.context_for(t, centers, forwards, m["is_target"])
+
+        # ----- context: aligned-nearest source views, resized to model input -----
         ctx_imgs = torch.stack([self._decode(scene["images"][c]) for c in ctx])
         ctx_K = intrinsics[ctx].clone()
         ctx_imgs, ctx_K = rescale_and_crop(ctx_imgs, ctx_K, self.image_shape)
@@ -188,10 +203,12 @@ class DatasetCarlaCSETrain(Dataset):
         far: float | None = None,
         default_near: float = 0.5,
         default_far: float = 150.0,
+        align_thresh: float = 0.5,
     ):
         self.data_dir = Path(data_dir)
         self.image_shape = tuple(image_shape)
         self.num_context_views = num_context_views
+        self.align_thresh = align_thresh
         self.cli_near, self.cli_far = near, far
         self.default_near, self.default_far = default_near, default_far
         self.to_tensor = tf.ToTensor()
@@ -216,11 +233,17 @@ class DatasetCarlaCSETrain(Dataset):
         scene = self._load_scene(scene_key)
         extrinsics, intrinsics = convert_poses(scene["cameras"])
 
-        # context = nearest views to the anchor (by camera center), anchor excluded
+        # context = direction-aligned views nearest to the anchor (anchor excluded)
         centers = extrinsics[:, :3, 3]
+        forwards = extrinsics[:, :3, :3] @ torch.tensor([0.0, 0.0, 1.0])
         d = (centers - centers[a]).norm(dim=1)
-        d[a] = float("inf")
-        k = min(self.num_context_views, d.numel() - 1)
+        aligned = (forwards @ forwards[a]) > self.align_thresh
+        aligned[a] = False
+        if int(aligned.sum()) < self.num_context_views:
+            aligned = torch.ones_like(aligned)
+            aligned[a] = False
+        d = torch.where(aligned, d, torch.full_like(d, float("inf")))
+        k = min(self.num_context_views, int(aligned.sum()))
         ctx = torch.topk(d, k, largest=False).indices
 
         ctx_imgs = torch.stack([self._decode(scene["images"][int(c)]) for c in ctx])

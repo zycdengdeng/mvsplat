@@ -98,6 +98,8 @@ def main():
     ap.add_argument("--far", type=float, default=None, help="override far for ALL scenes")
     ap.add_argument("--default_near", type=float, default=0.5)
     ap.add_argument("--default_far", type=float, default=150.0)
+    ap.add_argument("--align_thresh", type=float, default=0.5,
+                    help="context forward-dot threshold (-1 = pure nearest-center)")
     args = ap.parse_args()
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -112,6 +114,7 @@ def main():
         num_context_views=args.num_context_views,
         near=args.near, far=args.far,
         default_near=args.default_near, default_far=args.default_far,
+        align_thresh=args.align_thresh,
     )
 
     out_root = Path(args.out)
