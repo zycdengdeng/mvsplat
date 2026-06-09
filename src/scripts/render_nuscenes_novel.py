@@ -98,6 +98,10 @@ def main():
     ap.add_argument("--experiment", default="re10k")
     ap.add_argument("--num_context_views", type=int, default=6)
     ap.add_argument("--image_shape", type=int, nargs=2, default=[256, 256])
+    ap.add_argument("--context_mode", choices=["forward_nearest", "same_frame"],
+                    default="forward_nearest",
+                    help="forward_nearest: K nearest forward-facing views; "
+                         "same_frame: all cameras sharing the base frame index")
     ap.add_argument("--fwd_thresh", type=float, default=0.3,
                     help="keep context views whose forward dir dot base > this")
     ap.add_argument("--pos_scale", type=float, default=1.0,
@@ -132,12 +136,20 @@ def main():
     fx, fy, cx, cy = cmap.intrinsics_from_camera(base_cam)
     bc, bfwd = centers[bi], fwds[bi]
 
-    # context = forward-aligned views nearest to the base camera (base included)
-    dot = fwds @ bfwd
-    dist = np.linalg.norm(centers - bc, axis=1)
-    cand = np.where(dot > args.fwd_thresh)[0]
-    ctx_idx = cand[np.argsort(dist[cand])][: args.num_context_views]
-    print(f"[context] {len(ctx_idx)} views: {[names[j] for j in ctx_idx]}")
+    # context views
+    if args.context_mode == "same_frame":
+        # all cameras sharing the base's frame index (e.g. cam0/005, cam1/005, ...)
+        frame = Path(args.base).stem
+        same = np.array([i for i, n in enumerate(names) if Path(n).stem == frame])
+        ctx_idx = np.concatenate([[bi], same[same != bi]])  # base first
+    else:
+        # forward-aligned views nearest to the base camera (base included)
+        dot = fwds @ bfwd
+        dist = np.linalg.norm(centers - bc, axis=1)
+        cand = np.where(dot > args.fwd_thresh)[0]
+        ctx_idx = cand[np.argsort(dist[cand])][: args.num_context_views]
+    print(f"[context] mode={args.context_mode}, {len(ctx_idx)} views: "
+          f"{[names[j] for j in ctx_idx]}")
 
     images_dir = Path(args.images_dir) if args.images_dir else sparse.parents[1] / "images"
     to_tensor = tf.ToTensor()
