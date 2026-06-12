@@ -55,15 +55,31 @@ re10k & acid, each with **2-view** and **same-frame (6 surround cams)** context.
 Output: `outputs/nusc_*/<clip>/{00_orig..19_*}.png`; compare via `montage_nuscenes.py`.
 
 ## Reference (ours)
-| Method | CSE PSNR | SSE |
-|---|---|---|
-| GS-Net + 3DGS | 19.89 | +1.69 vs 3DGS |
-| 3DGS baseline | 18.00 | — |
+| Method | CSE PSNR | SSIM | LPIPS |
+|---|---|---|---|
+| 3DGS (SfM init) | 18.06 | 0.739 | 0.272 |
+| GS-Net + 3DGS (ours) | 19.75 | 0.741 | 0.266 |
+
+## Consolidated CSE comparison (paper口径)
+| Method | Type | PSNR | SSIM | LPIPS |
+|---|---|---|---|---|
+| 3DGS (SfM init) | per-scene opt | 18.06 | 0.739 | 0.272 |
+| **GS-Net + 3DGS (ours)** | per-scene opt | **19.75** | **0.741** | **0.266** |
+| MVSplat (zero-shot, 6-view) | feed-forward | 17.28 | 0.671 | 0.451 |
+| MonoSplat (zero-shot, 6-view) | feed-forward | 16.70 | 0.694 | 0.498 |
+| MVSplat (CARLA fine-tuned) | feed-forward | 17.96 | 0.674 | 0.405 |
+| MonoSplat (CARLA fine-tuned) | feed-forward | 18.41 | 0.703 | 0.455 |
+
+> Feed-forward methods get every advantage (6 context views, direction-aware
+> selection, in-domain fine-tuning, best-step selection) yet stay below GS-Net;
+> the SSIM/LPIPS gap (0.67-0.70 / 0.41-0.50 vs 0.74 / 0.27) is large even where
+> PSNR is close.
 
 ## Other feed-forward methods (same eval口径)
 | Method | CSE PSNR | SSIM | LPIPS | views |
 |---|---|---|---|---|
-| MonoSplat | 10.75 | 0.524 | 0.571 | (TBD) |
+| MonoSplat (zero-shot) | 16.70 | 0.694 | 0.498 | 6 |
+| MonoSplat (CARLA fine-tuned) | 18.41 | 0.703 | 0.455 | 6 |
 | DepthSplat | TBD | | | |
 
 To add a method: convert the scenes with `colmap_to_pixelsplat.py`, render the held-out
